@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="ko" class="bg-gray-950 text-gray-100">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PR Review Dashboard — RisuAI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .pr-body pre, .pr-body code { background: #1e293b; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.875rem; }
+    .pr-body h1,.pr-body h2,.pr-body h3 { font-weight: 600; margin-top: 0.75rem; margin-bottom: 0.25rem; }
+    .pr-body ul { list-style: disc; padding-left: 1.5rem; }
+    .pr-body ol { list-style: decimal; padding-left: 1.5rem; }
+    .pr-body a { color: #60a5fa; text-decoration: underline; }
+    .pr-body img { max-width: 100%; }
+    tr { transition: background-color 0.15s; }
+  </style>
+</head>
+<body class="min-h-screen" x-data="dashboard" x-init="init()">
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <!-- Header -->
+    <header class="mb-6">
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+            <svg class="w-7 h-7 text-gray-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            PR Review Dashboard
+          </h1>
+          <p class="text-gray-400 text-sm mt-1">kwaroran/risuAI</p>
+        </div>
+        <div class="text-right">
+          <p x-show="lastUpdated" class="text-sm text-gray-400">
+            마지막 갱신: <span x-text="lastUpdated" class="text-gray-300"></span>
+          </p>
+          <p x-show="stale" class="text-xs text-amber-400 mt-0.5 font-medium">⚠️ 데이터 갱신 실패 — 이전 데이터 표시 중</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Status Banner -->
+    <div x-show="error" x-cloak class="mb-4 p-3 rounded-lg bg-red-900/40 border border-red-700/60 text-red-300 text-sm">
+      <span x-text="error"></span>
+    </div>
+
+    <!-- Loading -->
+    <div x-show="loading" class="flex items-center justify-center py-20">
+      <div class="animate-spin rounded-full h-8 w-8 border-2 border-gray-600 border-t-blue-400"></div>
+      <span class="ml-3 text-gray-400">데이터를 불러오는 중...</span>
+    </div>
+
+    <!-- Content -->
+    <div x-show="!loading" x-cloak>
+
+      <!-- Empty State -->
+      <div x-show="prs.length === 0 && !loading" class="text-center py-16">
+        <div class="text-4xl mb-3">✅</div>
+        <p class="text-gray-400 text-lg">현재 열린 PR이 없습니다</p>
+        <p class="text-gray-500 text-sm mt-1">모든 PR이 머지되거나 닫혔습니다</p>
+      </div>
+
+      <!-- Filters -->
+      <div x-show="prs.length > 0" class="mb-5 space-y-3">
+        <!-- Filter chips row 1: Approval count -->
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="text-xs text-gray-400 mr-1">승인:</span>
+          <template x-for="opt in filterOptions.approvalCount" :key="opt.value">
+            <button
+              @click="toggleFilter('approvalCount', opt.value)"
+              :class="filterChipClass('approvalCount', opt.value)"
+              x-text="opt.label"
+              class="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+            ></button>
+          </template>
+          <label class="flex items-center gap-1 ml-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              x-model="filters.collaboratorOnlyApprovals"
+              class="w-3 h-3 rounded bg-gray-800 border-gray-600 text-emerald-500 focus:ring-0"
+            />
+            <span class="text-xs text-gray-400">콜라보 승인만</span>
+          </label>
+        </div>
+
+        <!-- Filter row 2: Author inclusion checklist -->
+        <div x-show="allAuthors.length > 0" class="flex flex-wrap items-center gap-1.5">
+          <span class="text-xs text-gray-400 mr-1">작성자:</span>
+          <template x-for="author in allAuthors" :key="author">
+            <label
+              :class="filters.authors.includes(author) ? 'opacity-100' : 'opacity-60'"
+              class="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-gray-700 cursor-pointer hover:border-gray-500 transition-colors select-none"
+            >
+              <input
+                type="checkbox"
+                :value="author"
+                x-model="filters.authors"
+                class="w-3 h-3 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-0"
+              />
+              <span x-text="author" class="text-gray-300"></span>
+            </label>
+          </template>
+        </div>
+
+        <!-- Filter row 3: Reviewer exclusion checklist -->
+        <div x-show="allReviewers.length > 0" class="flex flex-wrap items-center gap-1.5">
+          <span class="text-xs text-gray-400 mr-1">제외:</span>
+          <template x-for="rv in allReviewers" :key="rv.name">
+            <label
+              :class="filters.excludedReviewers.includes(rv.name) ? 'opacity-100' : 'opacity-60'"
+              class="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-gray-700 cursor-pointer hover:border-gray-500 transition-colors select-none"
+            >
+              <input
+                type="checkbox"
+                :value="rv.name"
+                x-model="filters.excludedReviewers"
+                class="w-3 h-3 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-0"
+              />
+              <span x-text="rv.name" class="text-gray-300"></span>
+              <span x-show="rv.association === 'COLLABORATOR' || rv.association === 'MEMBER' || rv.association === 'OWNER'"
+                    class="text-[9px] text-indigo-400 ml-0.5">콜라보</span>
+            </label>
+          </template>
+        </div>
+
+        <!-- Filter row 5: Draft + Age + Size -->
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-1.5">
+          <!-- Draft toggle -->
+          <label class="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              x-model="filters.excludeDrafts"
+              class="w-3 h-3 rounded bg-gray-800 border-gray-600 text-amber-500 focus:ring-0"
+            />
+            <span class="text-xs text-gray-400">Draft 제외</span>
+          </label>
+
+          <!-- Age chips -->
+          <div class="flex items-center gap-1.5">
+            <span class="text-xs text-gray-400">나이:</span>
+            <template x-for="opt in filterOptions.age" :key="opt.value">
+              <button
+                @click="toggleFilter('age', opt.value)"
+                :class="filterChipClass('age', opt.value)"
+                x-text="opt.label"
+                class="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+              ></button>
+            </template>
+          </div>
+
+          <!-- Size chips -->
+          <div class="flex items-center gap-1.5">
+            <span class="text-xs text-gray-400">크기:</span>
+            <template x-for="opt in filterOptions.size" :key="opt.value">
+              <button
+                @click="toggleFilter('size', opt.value)"
+                :class="filterChipClass('size', opt.value)"
+                x-text="opt.label"
+                class="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+              ></button>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="text-xs text-gray-400 mr-1">리뷰 상태:</span>
+          <template x-for="opt in filterOptions.reviewState" :key="opt.value">
+            <button
+              @click="toggleFilter('reviewState', opt.value)"
+              :class="filterChipClass('reviewState', opt.value)"
+              x-text="opt.label"
+              class="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+            ></button>
+          </template>
+        </div>
+
+        <!-- Sort + Reset -->
+        <div class="flex items-center gap-3">
+          <select
+            x-model="sortBy"
+            class="text-xs bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-300 focus:outline-none focus:border-gray-500"
+          >
+            <template x-for="opt in sortOptions" :key="opt.value">
+              <option :value="opt.value" x-text="'정렬: ' + opt.label"></option>
+            </template>
+          </select>
+          <button @click="resetFilters" class="text-xs text-gray-400 hover:text-gray-200 transition-colors">
+            필터 초기화
+          </button>
+          <span class="text-xs text-gray-600 ml-auto" x-text="filteredPRs.length + ' / ' + prs.length + '개 PR'"></span>
+        </div>
+      </div>
+
+      <!-- PR List — Desktop table -->
+      <div x-show="prs.length > 0" class="hidden lg:block overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800">
+              <th class="pb-2 pr-3 w-16">#</th>
+              <th class="pb-2 pr-3">제목</th>
+              <th class="pb-2 pr-3 w-28">작성자</th>
+              <th class="pb-2 pr-3 w-40">리뷰 상태</th>
+              <th class="pb-2 w-28">생성일</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="pr in filteredPRs" :key="pr.pr_number + '-' + pr.repository">
+              <tr
+                @click="toggleExpand(pr.pr_number + '-' + pr.repository)"
+                class="border-b border-gray-800/50 hover:bg-gray-800/30 cursor-pointer"
+              >
+                <td class="py-2.5 pr-3 text-gray-500 font-mono">
+                  <a :href="pr.url" target="_blank" @click.stop class="text-blue-400 hover:text-blue-300">#<span x-text="pr.pr_number"></span></a>
+                </td>
+                <td class="py-2.5 pr-3">
+                  <span x-show="pr.draft" class="inline-block px-1.5 py-0.5 text-[10px] rounded-full bg-amber-900/60 text-amber-300 border border-amber-700/50 mr-1.5">Draft</span>
+                  <span x-text="pr.title" class="text-gray-200"></span>
+                  <span x-show="pr.labels.length" class="ml-2">
+                    <template x-for="label in pr.labels" :key="label">
+                      <span x-text="label" class="inline-block px-1.5 py-0.5 text-[10px] rounded-full bg-gray-700 text-gray-300 mr-1"></span>
+                    </template>
+                  </span>
+                </td>
+                <td class="py-2.5 pr-3 text-gray-400">
+                  <span x-text="pr.author"></span>
+                </td>
+                <td class="py-2.5 pr-3">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <template x-for="rv in reviewSummary(pr)" :key="rv.type">
+                      <span :class="rv.bg + ' ' + rv.text" class="px-1.5 py-0.5 rounded text-[10px] font-medium" x-text="rv.label"></span>
+                    </template>
+                    <span x-show="reviewSummary(pr).length === 0" class="text-gray-600 text-xs">리뷰 없음</span>
+                  </div>
+                </td>
+                <td class="py-2.5 text-gray-500 text-xs" x-text="formatDate(pr.created_at)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- PR List — Mobile cards -->
+      <div x-show="prs.length > 0" class="lg:hidden space-y-3">
+        <template x-for="pr in filteredPRs" :key="pr.pr_number + '-' + pr.repository">
+          <div
+            @click="toggleExpand(pr.pr_number + '-' + pr.repository)"
+            class="bg-gray-900 border border-gray-800 rounded-xl p-4 cursor-pointer hover:border-gray-700 transition-colors"
+          >
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <span x-show="pr.draft" class="inline-block px-1.5 py-0.5 text-[10px] rounded-full bg-amber-900/60 text-amber-300 border border-amber-700/50 mr-1">Draft</span>
+              <a :href="pr.url" target="_blank" @click.stop class="text-blue-400 hover:text-blue-300 font-medium text-sm flex-1">
+                #<span x-text="pr.pr_number"></span> <span x-text="pr.title"></span>
+              </a>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <span class="text-gray-400" x-text="pr.author"></span>
+              <span class="text-gray-600">·</span>
+              <span class="text-gray-500" x-text="formatDate(pr.created_at)"></span>
+              <template x-for="label in pr.labels" :key="label">
+                <span x-text="label" class="px-1.5 py-0.5 text-[10px] rounded-full bg-gray-700 text-gray-300"></span>
+              </template>
+            </div>
+            <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+              <template x-for="rv in reviewSummary(pr)" :key="rv.type">
+                <span :class="rv.bg + ' ' + rv.text" class="px-1.5 py-0.5 rounded text-[10px] font-medium" x-text="rv.label"></span>
+              </template>
+              <span x-show="reviewSummary(pr).length === 0" class="text-gray-600 text-xs">리뷰 없음</span>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Expanded PR detail panel -->
+      <div x-show="expandedId" x-cloak class="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] px-4" @click.self="expandedId = null">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-2xl max-h-[75vh] overflow-y-auto shadow-2xl" @click.stop>
+          <template x-for="pr in filteredPRs" :key="pr.pr_number + '-' + pr.repository">
+            <div x-show="expandedId === (pr.pr_number + '-' + pr.repository)" class="p-6">
+              <!-- Header -->
+              <div class="flex items-start justify-between mb-4">
+                <div class="flex-1">
+                  <a :href="pr.url" target="_blank" class="text-lg font-semibold text-blue-400 hover:text-blue-300">
+                    #<span x-text="pr.pr_number"></span> <span x-text="pr.title"></span>
+                  </a>
+                  <div class="flex items-center gap-2 mt-1 text-sm text-gray-400">
+                    <span x-text="pr.author"></span>
+                    <span class="text-gray-600">·</span>
+                    <span x-text="formatDate(pr.created_at)"></span>
+                  </div>
+                </div>
+                <button @click="expandedId = null" class="text-gray-500 hover:text-gray-300 text-xl leading-none">&times;</button>
+              </div>
+
+              <!-- Labels -->
+              <div class="flex flex-wrap items-center gap-1.5 mb-4">
+                <span x-show="pr.draft" class="px-2 py-0.5 text-xs rounded-full bg-amber-900/60 text-amber-300 border border-amber-700/50 font-medium">Draft</span>
+                <template x-for="label in pr.labels" :key="label">
+                  <span x-text="label" class="px-2 py-0.5 text-xs rounded-full bg-gray-700 text-gray-300"></span>
+                </template>
+                <span class="text-xs text-gray-600 ml-1" x-text="'+' + (pr.additions || 0) + ' −' + (pr.deletions || 0) + '줄'"></span>
+              </div>
+
+              <!-- Body -->
+              <div x-show="pr.body" class="mb-5 pr-body text-sm text-gray-300 bg-gray-950 rounded-xl p-4 border border-gray-800 max-h-48 overflow-y-auto leading-relaxed" x-html="renderBody(pr.body)"></div>
+
+              <!-- Reviews -->
+              <div>
+                <h3 class="text-sm font-semibold text-gray-300 mb-3">리뷰 (<span x-text="pr.reviews.length"></span>)</h3>
+                <div x-show="pr.reviews.length === 0" class="text-sm text-gray-600">아직 리뷰가 없습니다</div>
+                <div x-show="pr.reviews.length > 0" class="space-y-2">
+                  <template x-for="rv in pr.reviews" :key="rv.reviewer + '-' + rv.submitted_at">
+                    <div class="flex items-center gap-3 bg-gray-950 rounded-lg px-3 py-2.5 border border-gray-800">
+                      <span x-text="rv.reviewer" class="text-sm text-gray-200 font-medium min-w-[80px]"></span>
+                      <span :class="reviewStateBadge(rv.state)" x-text="reviewStateLabel(rv.state)" class="px-2 py-0.5 rounded text-[11px] font-medium"></span>
+                      <span x-show="rv.author_association === 'COLLABORATOR' || rv.author_association === 'MEMBER' || rv.author_association === 'OWNER'"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-900/60 text-indigo-300 border border-indigo-700/50">
+                        콜라보
+                      </span>
+                      <span x-show="rv.author_association === 'CONTRIBUTOR'"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-900/60 text-emerald-300 border border-emerald-700/50">
+                        기여자
+                      </span>
+                      <span x-show="rv.author_association === 'NONE'"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800 text-gray-500 border border-gray-700/50">
+                        외부
+                      </span>
+                      <span class="ml-auto text-xs text-gray-600" x-text="formatDate(rv.submitted_at)"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener("alpine:init", () => {
+      Alpine.data("dashboard", () => ({
+        prs: [],
+        loading: true,
+        lastUpdated: "",
+        stale: false,
+        error: "",
+        expandedId: null,
+        sortBy: "created-desc",
+
+        filters: {
+          approvalCount: [],
+          reviewState: [],
+          excludedReviewers: [],
+          authors: [],
+          excludeDrafts: false,
+          collaboratorOnlyApprovals: false,
+          age: [],
+          size: [],
+        },
+
+        filterOptions: {
+          approvalCount: [
+            { value: "0", label: "0명" },
+            { value: "1", label: "1명" },
+            { value: "2+", label: "2명+" },
+          ],
+          reviewState: [
+            { value: "changes", label: "변경 요청 있음" },
+            { value: "unreviewed", label: "리뷰 없음" },
+          ],
+          age: [
+            { value: "1d", label: "1일 이내" },
+            { value: "1w", label: "1주 이내" },
+            { value: "old", label: "1주 이상" },
+          ],
+          size: [
+            { value: "s", label: "소 (<100줄)" },
+            { value: "m", label: "중 (100~500)" },
+            { value: "l", label: "대 (500+)" },
+          ],
+        },
+
+        sortOptions: [
+          { value: "created-desc", label: "최신순" },
+          { value: "created-asc", label: "오래된순" },
+          { value: "updated-desc", label: "최근 업데이트순" },
+          { value: "reviews-desc", label: "리뷰 많은순" },
+        ],
+
+        get filteredPRs() {
+          let result = [...this.prs];
+
+          // approvalCount filter
+          if (this.filters.approvalCount.length > 0) {
+            result = result.filter((pr) => {
+              const approvedCount = pr.reviews.filter((r) => {
+                if (r.state !== "APPROVED") return false;
+                if (this.filters.collaboratorOnlyApprovals) {
+                  return ["COLLABORATOR", "MEMBER", "OWNER"].includes(r.author_association);
+                }
+                return true;
+              }).length;
+              return this.filters.approvalCount.some((v) => {
+                if (v === "0") return approvedCount === 0;
+                if (v === "1") return approvedCount === 1;
+                if (v === "2+") return approvedCount >= 2;
+                return false;
+              });
+            });
+          }
+
+          // excludedReviewers filter: hide PRs where a checked reviewer has approved
+          if (this.filters.excludedReviewers.length > 0) {
+            result = result.filter((pr) => {
+              const approvedBy = pr.reviews
+                .filter((r) => r.state === "APPROVED")
+                .map((r) => r.reviewer);
+              return !this.filters.excludedReviewers.some((name) => approvedBy.includes(name));
+            });
+          }
+
+
+          // reviewState filter
+          if (this.filters.reviewState.length > 0) {
+            result = result.filter((pr) => {
+              const hasChanges = pr.reviews.some((r) => r.state === "CHANGES_REQUESTED");
+              const isUnreviewed = pr.reviews.length === 0;
+              return this.filters.reviewState.some((v) => {
+                if (v === "changes") return hasChanges;
+                if (v === "unreviewed") return isUnreviewed;
+                return false;
+              });
+            });
+          }
+
+          // authors filter: show only PRs from checked authors (inclusion)
+          if (this.filters.authors.length > 0) {
+            result = result.filter((pr) => this.filters.authors.includes(pr.author));
+          }
+
+          // excludeDrafts filter
+          if (this.filters.excludeDrafts) {
+            result = result.filter((pr) => !pr.draft);
+          }
+
+          // age filter (based on created_at)
+          if (this.filters.age.length > 0) {
+            const now = Date.now();
+            const DAY = 86400000;
+            result = result.filter((pr) => {
+              const ageMs = now - new Date(pr.created_at).getTime();
+              return this.filters.age.some((v) => {
+                if (v === "1d") return ageMs < DAY;
+                if (v === "1w") return ageMs < 7 * DAY;
+                if (v === "old") return ageMs >= 7 * DAY;
+                return false;
+              });
+            });
+          }
+
+          // size filter (additions + deletions)
+          if (this.filters.size.length > 0) {
+            result = result.filter((pr) => {
+              const total = (pr.additions || 0) + (pr.deletions || 0);
+              return this.filters.size.some((v) => {
+                if (v === "s") return total < 100;
+                if (v === "m") return total >= 100 && total < 500;
+                if (v === "l") return total >= 500;
+                return false;
+              });
+            });
+          }
+
+          // Sort
+          switch (this.sortBy) {
+            case "created-desc":
+              result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+              break;
+            case "created-asc":
+              result.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+              break;
+            case "updated-desc":
+              result.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+              break;
+            case "reviews-desc":
+              result.sort((a, b) => b.reviews.length - a.reviews.length);
+              break;
+          }
+
+          return result;
+        },
+
+        get allReviewers() {
+          const seen = new Map();
+          for (const pr of this.prs) {
+            for (const rv of pr.reviews) {
+              if (!seen.has(rv.reviewer)) {
+                seen.set(rv.reviewer, rv.author_association);
+              } else if (["COLLABORATOR","MEMBER","OWNER"].includes(rv.author_association) && !["COLLABORATOR","MEMBER","OWNER"].includes(seen.get(rv.reviewer))) {
+                seen.set(rv.reviewer, rv.author_association);
+              }
+            }
+          }
+          return Array.from(seen.entries())
+            .map(([name, association]) => ({ name, association }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        },
+
+        get allAuthors() {
+          const authors = new Set();
+          for (const pr of this.prs) {
+            if (pr.author) authors.add(pr.author);
+          }
+          return [...authors].sort((a, b) => a.localeCompare(b));
+        },
+
+        async init() {
+          try {
+            const resp = await fetch("data.json");
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            this.prs = data.prs || [];
+            this.lastUpdated = data.last_updated ? this.formatDate(data.last_updated) : "";
+            this.stale = data.status === "stale";
+            if (data.errors && data.errors.length > 0) {
+              this.error = `${data.errors.length}개 오류 발생 — 일부 데이터가 누락되었을 수 있습니다`;
+            }
+          } catch (err) {
+            this.error = "데이터를 불러올 수 없습니다";
+            console.error("Fetch error:", err);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        toggleFilter(category, value) {
+          const arr = this.filters[category];
+          const idx = arr.indexOf(value);
+          if (idx === -1) arr.push(value);
+          else arr.splice(idx, 1);
+        },
+
+        filterChipClass(category, value) {
+          const active = this.filters[category].includes(value);
+          if (active) {
+            if (category === "reviewState" && value === "changes") return "bg-red-900/40 text-red-300 border-red-700/50";
+            if (category === "reviewState" && value === "unreviewed") return "bg-gray-700 text-gray-300 border-gray-600";
+            if (category === "approvalCount" && value === "0") return "bg-gray-700 text-gray-300 border-gray-600";
+            if (category === "approvalCount" && value === "1") return "bg-amber-900/40 text-amber-300 border-amber-700/50";
+            if (category === "approvalCount" && value === "2+") return "bg-emerald-900/40 text-emerald-300 border-emerald-700/50";
+            return "bg-blue-900/40 text-blue-300 border-blue-700/50";
+          }
+          return "bg-transparent text-gray-400 border-gray-700 hover:border-gray-500 hover:text-gray-300";
+        },
+
+        resetFilters() {
+          this.filters = { approvalCount: [], reviewState: [], excludedReviewers: [], authors: [], excludeDrafts: false, collaboratorOnlyApprovals: false, age: [], size: [] };
+          this.sortBy = "created-desc";
+        },
+
+        toggleExpand(id) {
+          this.expandedId = this.expandedId === id ? null : id;
+        },
+
+        reviewSummary(pr) {
+          const summary = [];
+          const approved = pr.reviews.filter((r) => r.state === "APPROVED").length;
+          const changes = pr.reviews.filter((r) => r.state === "CHANGES_REQUESTED").length;
+          const commented = pr.reviews.filter((r) => r.state === "COMMENTED").length;
+
+          if (approved > 0) {
+            const hasCollab = pr.reviews.some(
+              (r) => r.state === "APPROVED" && ["COLLABORATOR", "MEMBER", "OWNER"].includes(r.author_association)
+            );
+            summary.push({
+              type: "approved",
+              label: `승인 ${approved}`,
+              bg: hasCollab ? "bg-emerald-900/60" : "bg-emerald-900/40",
+              text: "text-emerald-300",
+            });
+          }
+          if (changes > 0) {
+            summary.push({
+              type: "changes",
+              label: `변경요청 ${changes}`,
+              bg: "bg-red-900/60",
+              text: "text-red-300",
+            });
+          }
+          if (commented > 0) {
+            summary.push({
+              type: "commented",
+              label: `코멘트 ${commented}`,
+              bg: "bg-gray-700",
+              text: "text-gray-300",
+            });
+          }
+          return summary;
+        },
+
+        reviewStateLabel(state) {
+          const map = {
+            APPROVED: "승인",
+            CHANGES_REQUESTED: "변경 요청",
+            COMMENTED: "코멘트",
+            DISMISSED: "무효화",
+          };
+          return map[state] || state;
+        },
+
+        reviewStateBadge(state) {
+          const map = {
+            APPROVED: "bg-emerald-900/50 text-emerald-300",
+            CHANGES_REQUESTED: "bg-red-900/50 text-red-300",
+            COMMENTED: "bg-gray-700 text-gray-300",
+            DISMISSED: "bg-gray-800 text-gray-500",
+          };
+          return map[state] || "bg-gray-800 text-gray-400";
+        },
+
+        formatDate(iso) {
+          if (!iso) return "";
+          const d = new Date(iso);
+          const now = new Date();
+          const diffMs = now - d;
+          const diffMin = Math.floor(diffMs / 60000);
+          const diffHr = Math.floor(diffMs / 3600000);
+          const diffDay = Math.floor(diffMs / 86400000);
+
+          if (diffMin < 1) return "방금 전";
+          if (diffMin < 60) return `${diffMin}분 전`;
+          if (diffHr < 24) return `${diffHr}시간 전`;
+          if (diffDay < 7) return `${diffDay}일 전`;
+          return d.toLocaleDateString("ko-KR", { month: "short", day: "numeric" });
+        },
+
+        renderBody(body) {
+          if (!body) return "";
+          // Basic markdown-ish rendering: newlines, crlf
+          let html = body
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\r\n/g, "\n")
+            .replace(/\n\n/g, "<br><br>")
+            .replace(/\n/g, "<br>")
+            // Inline code
+            .replace(/`([^`]+)`/g, "<code>$1</code>")
+            // Bold
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            // Italic
+            .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+          return html;
+        },
+      }));
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "risuai-prs",
+  "private": true,
+  "scripts": {
+    "fetch": "node scripts/fetch-prs.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.0.0",
+    "dotenv": "^16.4.0"
+  }
+}
