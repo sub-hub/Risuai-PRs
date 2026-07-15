@@ -512,6 +512,40 @@
           return [...authors].sort((a, b) => a.localeCompare(b));
         },
 
+        get filterHash() {
+          return JSON.stringify(this.filters) + '|' + this.sortBy;
+        },
+
+        syncToHash() {
+          const parts = [];
+          if (this.filters.approvalCount.length) parts.push('ac=' + this.filters.approvalCount.join(','));
+          if (this.filters.reviewState.length) parts.push('rs=' + this.filters.reviewState.join(','));
+          if (this.filters.excludedReviewers.length) parts.push('er=' + this.filters.excludedReviewers.map(encodeURIComponent).join(','));
+          if (this.filters.authors.length) parts.push('au=' + this.filters.authors.map(encodeURIComponent).join(','));
+          if (this.filters.age.length) parts.push('age=' + this.filters.age.join(','));
+          if (this.filters.size.length) parts.push('sz=' + this.filters.size.join(','));
+          if (this.filters.excludeDrafts) parts.push('ed=1');
+          if (this.filters.collaboratorOnlyApprovals) parts.push('coa=1');
+          if (this.sortBy !== 'created-desc') parts.push('sort=' + this.sortBy);
+          const hash = parts.join('&');
+          window.history.replaceState(null, '', window.location.pathname + (hash ? '#' + hash : ''));
+        },
+
+        loadFromHash() {
+          const raw = window.location.hash.slice(1);
+          if (!raw) return;
+          const params = new URLSearchParams(raw);
+          if (params.has('ac')) this.filters.approvalCount = params.get('ac').split(',');
+          if (params.has('rs')) this.filters.reviewState = params.get('rs').split(',');
+          if (params.has('er')) this.filters.excludedReviewers = params.get('er').split(',').map(decodeURIComponent);
+          if (params.has('au')) this.filters.authors = params.get('au').split(',').map(decodeURIComponent);
+          if (params.has('age')) this.filters.age = params.get('age').split(',');
+          if (params.has('sz')) this.filters.size = params.get('sz').split(',');
+          if (params.has('ed')) this.filters.excludeDrafts = true;
+          if (params.has('coa')) this.filters.collaboratorOnlyApprovals = true;
+          if (params.has('sort')) this.sortBy = params.get('sort');
+        },
+
         async init() {
           try {
             const resp = await fetch("data.json");
@@ -523,12 +557,14 @@
             if (data.errors && data.errors.length > 0) {
               this.error = `${data.errors.length}개 오류 발생 — 일부 데이터가 누락되었을 수 있습니다`;
             }
+            this.loadFromHash();
           } catch (err) {
             this.error = "데이터를 불러올 수 없습니다";
             console.error("Fetch error:", err);
           } finally {
             this.loading = false;
           }
+          this.$watch('filterHash', () => this.syncToHash());
         },
 
         toggleFilter(category, value) {
