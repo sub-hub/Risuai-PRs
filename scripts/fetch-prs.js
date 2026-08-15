@@ -20,6 +20,25 @@ async function main() {
 
   const allPRs = [];
   const errors = [];
+  let freshRepos = 0;
+
+  // Load previous data.json for graceful degradation: if a repo fetch fails
+  // (e.g. expired token, rate limit), keep that repo's previously fetched PRs
+  // instead of wiping the dashboard with empty data.
+  const previousByRepo = new Map();
+  try {
+    if (fs.existsSync(OUTPUT_PATH)) {
+      const previous = JSON.parse(fs.readFileSync(OUTPUT_PATH, "utf-8"));
+      if (Array.isArray(previous.prs)) {
+        for (const p of previous.prs) {
+          if (!previousByRepo.has(p.repository)) previousByRepo.set(p.repository, []);
+          previousByRepo.get(p.repository).push(p);
+        }
+      }
+    }
+  } catch (prevErr) {
+    console.warn(`Could not read previous data.json: ${prevErr.message}`);
+  }
 
   for (const repoFullName of repos) {
     const [owner, repo] = repoFullName.split("/");
@@ -33,6 +52,7 @@ async function main() {
         state: "open",
         per_page: 100,
       });
+      freshRepos += 1;
 
       console.log(`  Found ${pulls.length} open PR(s)`);
 
@@ -85,6 +105,9 @@ async function main() {
             pr_number: pr.number,
             error: prErr.message,
           });
+          // Keep the previously fetched entry for this PR if available.
+          const old = (previousByRepo.get(repoFullName) || []).find((p) => p.pr_number === pr.number);
+          if (old) allPRs.push(old);
         }
       }
     } catch (repoErr) {
@@ -93,21 +116,34 @@ async function main() {
         repository: repoFullName,
         error: repoErr.message,
       });
+      // Graceful degradation: keep this repo's previously fetched PRs.
+      const stale = previousByRepo.get(repoFullName) || [];
+      if (stale.length > 0) {
+        console.log(`  Keeping ${stale.length} previously fetched PR(s) for ${repoFullName}`);
+        allPRs.push(...stale);
+      }
     }
   }
 
+  // status: "ok" = all fresh, "partial" = some repos failed (old data kept for those),
+  // "stale" = every repo fetch failed, data is entirely from the previous run.
+  const status = errors.length === 0 ? "ok" : freshRepos === 0 ? "stale" : "partial";
+
   const output = {
     last_updated: new Date().toISOString(),
-    status: errors.length > 0 ? "partial" : "ok",
+    status,
     total_count: allPRs.length,
     prs: allPRs,
     errors: errors,
   };
 
   fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2), "utf-8");
-  console.log(`\nDone. ${allPRs.length} PR(s) written to data.json`);
+  console.log(`\nDone. ${allPRs.length} PR(s) written to data.json (status=${status})`);
   if (errors.length > 0) {
     console.log(`${errors.length} error(s) occurred.`);
+    if (freshRepos === 0) {
+      console.log("All repo fetches failed — previous data kept with status=stale.");
+    }
   }
 }
 

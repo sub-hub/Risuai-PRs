@@ -1,6 +1,6 @@
 {
-  "last_updated": "2026-07-13T12:39:04.272Z",
-  "status": "ok",
+  "last_updated": "2026-08-15T14:12:38.663Z",
+  "status": "stale",
   "total_count": 72,
   "prs": [
     {
@@ -1328,5 +1328,10 @@
       ]
     }
   ],
-  "errors": []
+  "errors": [
+    {
+      "repository": "kwaroran/risuAI",
+      "error": "Bad credentials - https://docs.github.com/rest"
+    }
+  ]
 }
