@@ -47,6 +47,14 @@ jobs:
         with:
           path: "_site"
 
+  # GitHub disables scheduled workflows after 60 days without repo activity
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: gautamkrishnar/keepalive-workflow@v2
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
