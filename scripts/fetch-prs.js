@@ -46,7 +46,7 @@ async function main() {
 
     try {
       // Fetch open PRs
-      const { data: pulls } = await octokit.rest.pulls.list({
+      const pulls = await octokit.paginate(octokit.rest.pulls.list, {
         owner,
         repo,
         state: "open",
@@ -61,18 +61,23 @@ async function main() {
           // Fetch PR detail (additions, deletions, draft) and reviews in parallel
           const [detailResult, reviewsResult] = await Promise.allSettled([
             octokit.rest.pulls.get({ owner, repo, pull_number: pr.number }),
-            octokit.rest.pulls.listReviews({ owner, repo, pull_number: pr.number, per_page: 100 }),
+            octokit.paginate(octokit.rest.pulls.listReviews, { owner, repo, pull_number: pr.number, per_page: 100 }),
           ]);
 
           const prDetail = detailResult.status === "fulfilled" ? detailResult.value.data : null;
-          const reviews = reviewsResult.status === "fulfilled" ? reviewsResult.value.data : [];
+          const reviews = reviewsResult.status === "fulfilled" ? reviewsResult.value : [];
 
-          // Deduplicate: keep only the latest review per reviewer
+          // Deduplicate: keep only the latest review per reviewer. A later COMMENTED
+          // review does not replace an APPROVED/CHANGES_REQUESTED/DISMISSED one,
+          // matching how GitHub keeps the approval in place.
           const latestByReviewer = new Map();
           for (const r of reviews) {
+            if (r.state === "PENDING") continue;
             const reviewer = r.user?.login || "unknown";
             const existing = latestByReviewer.get(reviewer);
-            if (!existing || new Date(r.submitted_at) > new Date(existing.submitted_at)) {
+            const newer = !existing || new Date(r.submitted_at) > new Date(existing.submitted_at);
+            const keepsVerdict = existing && existing.state !== "COMMENTED" && r.state === "COMMENTED";
+            if (newer && !keepsVerdict) {
               latestByReviewer.set(reviewer, {
                 reviewer,
                 state: r.state, // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED

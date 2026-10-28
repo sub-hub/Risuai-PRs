@@ -407,13 +407,14 @@
             });
           }
 
-          // excludedReviewers filter: hide PRs where a checked reviewer has approved
+          // excludedReviewers filter: hide PRs a checked reviewer has approved or authored
+          // (authors cannot approve their own PRs, so those need nothing from them either)
           if (this.filters.excludedReviewers.length > 0) {
             result = result.filter((pr) => {
               const approvedBy = pr.reviews
                 .filter((r) => r.state === "APPROVED")
                 .map((r) => r.reviewer);
-              return !this.filters.excludedReviewers.some((name) => approvedBy.includes(name));
+              return !this.filters.excludedReviewers.some((name) => approvedBy.includes(name) || pr.author === name);
             });
           }
 
